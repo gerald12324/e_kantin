@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { ArrowUpRight, Check, ChevronDown, CircleDollarSign, ClipboardList, LayoutDashboard, PackagePlus, Plus, RefreshCw, Utensils, X } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronDown, CircleDollarSign, ClipboardList, LayoutDashboard, Minus, PackagePlus, Plus, RefreshCw, ShoppingCart, Trash2, Utensils, X } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const currency = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
@@ -10,7 +10,7 @@ function StatusBadge({ status }) {
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${styles[status] || 'bg-gray-50 text-gray-600 ring-gray-200'}`}>{status}</span>;
 }
 
-function App() {
+function AdminApp() {
   const [activePage, setActivePage] = useState('Dashboard');
   const [stats, setStats] = useState({ totalOrdersToday: 0, totalRevenue: 0 });
   const [orders, setOrders] = useState([]);
@@ -101,6 +101,41 @@ function MenuPage({ menus, onAdd }) {
 
 function Field({ label, children }) {
   return <label className="block text-xs font-semibold text-[#527064]">{label}<span className="mt-1.5 block">{children}</span></label>;
+}
+
+function ClientApp() {
+  const [menus, setMenus] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [user, setUser] = useState(null);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    Promise.all([axios.get(`${API_URL}/menu`), axios.get(`${API_URL}/user`)]).then(([menuResponse, userResponse]) => {
+      setMenus(menuResponse.data);
+      setUser(userResponse.data);
+    }).catch(() => setMessage('Server belum terhubung. Silakan coba lagi.'));
+  }, []);
+
+  const addToCart = (menu) => setCart((current) => {
+    const existing = current.find((item) => item.menuId === menu.id);
+    return existing ? current.map((item) => item.menuId === menu.id ? { ...item, quantity: item.quantity + 1 } : item) : [...current, { menuId: menu.id, name: menu.name, price: Number(menu.price), quantity: 1 }];
+  });
+  const changeQuantity = (menuId, amount) => setCart((current) => current.map((item) => item.menuId === menuId ? { ...item, quantity: item.quantity + amount } : item).filter((item) => item.quantity > 0));
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const checkout = async () => {
+    if (!cart.length || !user) return;
+    try {
+      await axios.post(`${API_URL}/order`, { userId: user.id, items: cart, paymentMethod: 'E-Money', totalAmount: total });
+      setCart([]);
+      setMessage('Pesanan berhasil dibuat. Silakan tunggu di kantin.');
+    } catch (requestError) { setMessage(requestError.response?.data?.message || 'Checkout gagal.'); }
+  };
+
+  return <div className="min-h-screen bg-[#f6f8f7] text-[#17211d]"><header className="flex items-center justify-between border-b border-[#dce5df] bg-[#10251e] px-5 py-5 text-white md:px-10"><div><p className="text-xl font-bold">E-Kantin Smart Order</p><p className="text-xs text-[#b8c9c0]">Pesan makanan tanpa antre panjang</p></div><div className="flex items-center gap-4"><a href="/admin" className="rounded-lg bg-[#d8f36b] px-3 py-2 text-xs font-bold text-[#10251e] transition hover:bg-white">Dashboard Admin</a><div className="text-right"><p className="text-sm">{user?.name || 'Siswa'}</p><p className="text-xs text-[#d8f36b]">Saldo: {currency.format(user?.emoneyBalance || 0)}</p></div></div></header><main className="mx-auto grid max-w-7xl gap-6 p-5 md:p-10 lg:grid-cols-[1fr_360px]">{message && <p className="rounded-xl bg-[#edf5cf] p-4 text-sm font-medium text-[#385228] lg:col-span-2">{message}</p>}<section><div className="mb-6"><p className="text-sm text-[#7a8f85]">Menu hari ini</p><h1 className="mt-1 text-3xl font-bold">Makan enak, tinggal klik.</h1></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{menus.map((menu) => <article key={menu.id} className="rounded-2xl border border-[#dce5df] bg-white p-5 shadow-sm"><span className="rounded-full bg-[#edf5cf] px-2.5 py-1 text-xs font-semibold text-[#527064]">{menu.category}</span><h2 className="mt-5 font-bold">{menu.name}</h2><p className="mt-2 text-sm text-[#7a8f85]">Stok: {menu.stock}</p><div className="mt-5 flex items-center justify-between"><b>{currency.format(menu.price)}</b><button disabled={!menu.stock} onClick={() => addToCart(menu)} className="rounded-lg bg-[#10251e] p-2 text-[#d8f36b] disabled:opacity-30" title="Tambah ke keranjang"><Plus size={18} /></button></div></article>)}</div></section><aside className="h-fit rounded-2xl border border-[#dce5df] bg-white p-5 shadow-sm lg:sticky lg:top-5"><h2 className="flex items-center gap-2 text-lg font-bold"><ShoppingCart size={19} />Keranjang</h2>{!cart.length ? <p className="py-12 text-center text-sm text-[#7a8f85]">Keranjang masih kosong.</p> : <><div className="my-5 space-y-3">{cart.map((item) => <div key={item.menuId} className="flex items-center justify-between gap-3 rounded-xl bg-[#f6f8f7] p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{item.name}</p><p className="text-xs text-[#7a8f85]">{currency.format(item.price)}</p></div><div className="flex items-center gap-2"><button onClick={() => changeQuantity(item.menuId, -1)} className="rounded bg-white p-1"><Minus size={14} /></button><span className="text-sm font-bold">{item.quantity}</span><button onClick={() => addToCart(item)} className="rounded bg-white p-1"><Plus size={14} /></button><button onClick={() => setCart((current) => current.filter((entry) => entry.menuId !== item.menuId))} className="p-1 text-rose-500"><Trash2 size={14} /></button></div></div>)}</div><div className="flex justify-between border-t border-[#edf1ee] pt-4 font-bold"><span>Total</span><span>{currency.format(total)}</span></div><button onClick={checkout} className="mt-5 w-full rounded-xl bg-[#d8f36b] px-4 py-3 text-sm font-bold text-[#10251e]">Bayar Sekarang</button></>}</aside></main></div>;
+}
+
+function App() {
+  return window.location.pathname.startsWith('/admin') ? <AdminApp /> : <ClientApp />;
 }
 
 export default App;

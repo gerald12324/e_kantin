@@ -31,6 +31,40 @@ app.get('/api/menu', async (req, res) => {
   }
 });
 
+app.get('/api/user', async (req, res) => {
+  try {
+    const [users] = await pool.query('SELECT id, nama AS name, saldo_emoney AS emoneyBalance FROM users ORDER BY id LIMIT 1');
+    res.json(users[0] || null);
+  } catch (error) {
+    res.status(500).json({ message: 'Gagal mengambil user', detail: error.message });
+  }
+});
+
+app.post('/api/order', async (req, res) => {
+  const { userId, items, paymentMethod, totalAmount } = req.body;
+  if (!userId || !Array.isArray(items) || !items.length) return res.status(400).json({ message: 'Pesanan tidak boleh kosong' });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [userRows] = await connection.execute('SELECT id, saldo_emoney FROM users WHERE id = ? FOR UPDATE', [userId]);
+    if (!userRows.length) throw new Error('User tidak ditemukan');
+    if (paymentMethod === 'E-Money' && Number(userRows[0].saldo_emoney) < Number(totalAmount)) throw new Error('Saldo E-Money tidak mencukupi');
+    for (const item of items) {
+      const [menuRows] = await connection.execute('SELECT stok FROM menus WHERE id = ? FOR UPDATE', [item.menuId]);
+      if (!menuRows.length || menuRows[0].stok < item.quantity) throw new Error('Stok menu tidak mencukupi');
+      await connection.execute('UPDATE menus SET stok = stok - ? WHERE id = ?', [item.quantity, item.menuId]);
+    }
+    if (paymentMethod === 'E-Money') await connection.execute('UPDATE users SET saldo_emoney = saldo_emoney - ? WHERE id = ?', [totalAmount, userId]);
+    const [orderResult] = await connection.execute('INSERT INTO orders (user_id, total_harga, metode_pembayaran, status) VALUES (?, ?, ?, ?)', [userId, totalAmount, paymentMethod, 'Menunggu']);
+    for (const item of items) await connection.execute('INSERT INTO order_items (order_id, menu_id, kuantitas, harga_satuan) VALUES (?, ?, ?, ?)', [orderResult.insertId, item.menuId, item.quantity, item.price]);
+    await connection.commit();
+    res.status(201).json({ message: 'Pesanan berhasil dibuat', orderId: orderResult.insertId });
+  } catch (error) {
+    await connection.rollback();
+    res.status(400).json({ message: error.message || 'Checkout gagal' });
+  } finally { connection.release(); }
+});
+
 app.get('/api/admin/stats', async (req, res) => {
   try {
     const [[stats]] = await pool.query(`
@@ -106,6 +140,10 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
